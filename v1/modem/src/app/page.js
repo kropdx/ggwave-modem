@@ -7,6 +7,8 @@ export default function Home() {
   const [code, setCode] = useState('');
   const [status, setStatus] = useState('idle');
   const [isCaptureActive, setIsCaptureActive] = useState(false);
+  const [receivedCodes, setReceivedCodes] = useState([]);
+  const [lastCodeReceived, setLastCodeReceived] = useState('');
   const [ggwaveInstance, setGgwaveInstance] = useState(null);
   const [mediaStream, setMediaStream] = useState(null);
   const [audioContext, setAudioContext] = useState(null);
@@ -55,7 +57,7 @@ export default function Home() {
         audioContext.close();
       }
     };
-  }, []);
+  }, [audioContext, mediaStream, recorder]);
 
   // Helper function to convert between typed arrays
   const convertTypedArray = (src, type) => {
@@ -118,12 +120,22 @@ export default function Home() {
           const decodedText = new TextDecoder("utf-8").decode(res);
           console.log('Decoded text:', decodedText);
 
-          // Check if the decoded text matches the code we're listening for
-          if (decodedText === code) {
-            setStatus('success');
-            // Stop capturing if code matched
-            stopCapturing();
+          // Add the received code to our list if it's not a duplicate of the most recent code
+          if (decodedText !== lastCodeReceived) {
+            setLastCodeReceived(decodedText);
+            setReceivedCodes(prev => {
+              // Add the new code with timestamp
+              const newList = [
+                { text: decodedText, time: new Date().toLocaleTimeString() },
+                ...prev
+              ];
+              // Limit the list to the most recent 10 codes
+              return newList.slice(0, 10);
+            });
           }
+          
+          // Set status to success to show we're getting data, but don't stop capturing
+          setStatus('receiving');
         }
       };
 
@@ -160,6 +172,8 @@ export default function Home() {
   const resetListener = () => {
     stopCapturing();
     setStatus('idle');
+    setReceivedCodes([]);
+    setLastCodeReceived('');
   };
 
   return (
@@ -174,29 +188,21 @@ export default function Home() {
 
         <div className="space-y-6">
           <div>
-            <label htmlFor="code" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-              Code to Listen For
-            </label>
-            <div className="mt-1">
-              <input
-                type="text"
-                id="code"
-                value={code}
-                onChange={(e) => setCode(e.target.value)}
-                disabled={isCaptureActive}
-                placeholder="Enter code to listen for..."
-                className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-700 dark:text-white"
-              />
-            </div>
+            <h2 className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+              Sound-based Modem Receiver
+            </h2>
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              This receiver will continuously listen for and display any sound codes it detects
+            </p>
           </div>
 
           <div className="flex justify-center">
             {!isCaptureActive ? (
               <button
                 onClick={startCapturing}
-                disabled={!code || !ggwaveInstance}
+                disabled={!ggwaveInstance}
                 className={`px-4 py-2 rounded-md text-white ${
-                  !code || !ggwaveInstance
+                  !ggwaveInstance
                     ? 'bg-gray-400 cursor-not-allowed'
                     : 'bg-indigo-600 hover:bg-indigo-700'
                 }`}
@@ -216,28 +222,41 @@ export default function Home() {
           <div className="text-center">
             {status === 'idle' && (
               <p className="text-gray-500 dark:text-gray-400">
-                Enter a code and press Start Listening
+                Press Start Listening to begin detecting codes
               </p>
             )}
             {status === 'listening' && (
               <div className="animate-pulse flex items-center justify-center space-x-2">
                 <div className="w-3 h-3 bg-indigo-500 rounded-full"></div>
                 <p className="text-indigo-600 dark:text-indigo-400">
-                  Listening for "{code}"...
+                  Listening for codes...
                 </p>
               </div>
             )}
-            {status === 'success' && (
-              <div className="bg-green-100 dark:bg-green-800 p-4 rounded-md">
-                <p className="text-green-800 dark:text-green-200 flex items-center justify-center">
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
-                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                  </svg>
-                  Success! Code "{code}" detected
-                </p>
+            {status === 'receiving' && receivedCodes.length > 0 && (
+              <div>
+                <div className="animate-pulse flex items-center justify-center space-x-2 mb-4">
+                  <div className="w-3 h-3 bg-green-500 rounded-full"></div>
+                  <p className="text-green-600 dark:text-green-400">
+                    Actively receiving codes
+                  </p>
+                </div>
+                
+                <div className="bg-gray-100 dark:bg-gray-700 p-4 rounded-md max-h-60 overflow-y-auto">
+                  <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">Received Codes:</h3>
+                  <ul className="space-y-2">
+                    {receivedCodes.map((item, index) => (
+                      <li key={index} className="flex justify-between items-center p-2 bg-white dark:bg-gray-800 rounded shadow-sm">
+                        <span className="font-mono text-gray-800 dark:text-gray-200">{item.text}</span>
+                        <span className="text-xs text-gray-500 dark:text-gray-400">{item.time}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+                
                 <button
                   onClick={resetListener}
-                  className="mt-3 px-4 py-2 bg-green-600 hover:bg-green-700 rounded-md text-white text-sm"
+                  className="mt-3 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 rounded-md text-white text-sm"
                 >
                   Reset
                 </button>

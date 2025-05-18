@@ -60,7 +60,7 @@ export default function Transmit() {
         audioContext.close();
       }
     };
-  }, []);
+  }, [audioContext]);
 
   // Helper function to convert between typed arrays
   const convertTypedArray = (src, type) => {
@@ -266,7 +266,7 @@ export default function Transmit() {
             {status === 'sending' && (
               <div>
                 <p className="text-blue-600 dark:text-blue-400 mb-2">
-                  Transmitting "{code}"...
+                  Transmitting &ldquo;{code}&rdquo;...
                 </p>
                 <div className="border border-blue-200 dark:border-blue-800 rounded-md overflow-hidden">
                   <canvas ref={canvasRef} className="w-full h-32"></canvas>
@@ -276,7 +276,7 @@ export default function Transmit() {
             {status === 'sent' && (
               <div className="bg-green-100 dark:bg-green-800 p-4 rounded-md">
                 <p className="text-green-800 dark:text-green-200">
-                  Code "{code}" transmitted successfully!
+                  Code &ldquo;{code}&rdquo; transmitted successfully!
                 </p>
               </div>
             )}
