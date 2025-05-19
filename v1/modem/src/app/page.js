@@ -108,75 +108,38 @@ export default function Home() {
       analyzerNode.fftSize = 1024;
       mediaStreamSource.connect(analyzerNode);
       
-      // Set up visualization if canvas exists
-      if (canvasRef.current) {
-        const canvas = canvasRef.current;
-        const canvasCtx = canvas.getContext('2d');
-        const bufferLength = analyzerNode.frequencyBinCount;
-        const dataArray = new Uint8Array(bufferLength);
-        const freqData = new Uint8Array(bufferLength);
-        
-        function drawSignal() {
-          if (!isCaptureActive) return;
-          
-          requestAnimationFrame(drawSignal);
-          
-          // Get time and frequency domain data
-          analyzerNode.getByteTimeDomainData(dataArray);
-          analyzerNode.getByteFrequencyData(freqData);
-          
-          // Calculate signal strength
-          let sum = 0;
-          for (let i = 0; i < freqData.length; i++) {
-            sum += freqData[i];
-          }
-          const avgStrength = sum / freqData.length;
-          const normalizedStrength = avgStrength / 255;
-          setSignalStrength(normalizedStrength);
-          
-          // Clear canvas
-          canvasCtx.fillStyle = 'rgb(34, 40, 49)';
-          canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
-          
-          // Draw waveform
-          canvasCtx.lineWidth = 2;
-          canvasCtx.strokeStyle = 'rgb(0, 255, 0)';
-          canvasCtx.beginPath();
-          
-          const sliceWidth = canvas.width / bufferLength;
-          let x = 0;
-          
-          for (let i = 0; i < bufferLength; i++) {
-            const v = dataArray[i] / 128.0;
-            const y = v * canvas.height/2;
-            
-            if (i === 0) {
-              canvasCtx.moveTo(x, y);
-            } else {
-              canvasCtx.lineTo(x, y);
-            }
-            
-            x += sliceWidth;
-          }
-          
-          canvasCtx.lineTo(canvas.width, canvas.height/2);
-          canvasCtx.stroke();
-          
-          // Draw frequency spectrum
-          canvasCtx.fillStyle = 'rgb(0, 255, 255)';
-          const barWidth = canvas.width / (bufferLength / 4);
-          x = 0;
-          
-          // Only show lower frequencies (first quarter of data)
-          for (let i = 0; i < bufferLength / 4; i++) {
-            const barHeight = (freqData[i] / 255) * (canvas.height / 3);
-            canvasCtx.fillRect(x, canvas.height - barHeight, barWidth, barHeight);
-            x += barWidth;
-          }
+      // Setup visualization data (without requiring canvas to be mounted yet)
+      const bufferLength = analyzerNode.frequencyBinCount;
+      const dataArray = new Uint8Array(bufferLength);
+      const freqData = new Uint8Array(bufferLength);
+      
+      // Setup an interval to update the signal strength
+      const visualizationInterval = setInterval(() => {
+        if (!isCaptureActive) {
+          clearInterval(visualizationInterval);
+          return;
         }
         
-        drawSignal();
-      }
+        // Get frequency data to calculate signal strength
+        analyzerNode.getByteFrequencyData(freqData);
+        
+        // Calculate signal strength
+        let sum = 0;
+        for (let i = 0; i < freqData.length; i++) {
+          sum += freqData[i];
+        }
+        const avgStrength = sum / freqData.length;
+        const normalizedStrength = avgStrength / 255;
+        setSignalStrength(normalizedStrength);
+      }, 100); // Update 10 times per second
+      
+      // Clean up function to be called when component unmounts
+      const cleanup = () => {
+        clearInterval(visualizationInterval);
+      };
+      
+      // Store cleanup function for later use
+      window.modemCleanup = cleanup;
 
       // Create script processor for audio processing
       const bufferSize = 1024;
@@ -310,8 +273,22 @@ export default function Home() {
                   </p>
                 </div>
                 
-                <div className="border border-indigo-200 dark:border-indigo-800 rounded-md overflow-hidden mb-2">
-                  <canvas ref={canvasRef} width="600" height="120" className="w-full h-32"></canvas>
+                <div className="border border-indigo-200 dark:border-indigo-800 rounded-md overflow-hidden mb-2 h-32 w-full bg-gray-900">
+                  {/* Replacing canvas with simpler visualization */}
+                  <div className="flex h-full items-center justify-center">
+                    <div className="flex space-x-1">
+                      {[...Array(10)].map((_, i) => (
+                        <div 
+                          key={i} 
+                          className="w-2 bg-green-500 rounded-full animate-pulse" 
+                          style={{
+                            height: `${(signalStrength * 100) * (0.5 + Math.random() * 0.5)}%`,
+                            animationDelay: `${i * 0.1}s`
+                          }}
+                        />
+                      ))}
+                    </div>
+                  </div>
                 </div>
                 
                 {/* Signal strength indicator */}
@@ -337,8 +314,22 @@ export default function Home() {
                   </p>
                 </div>
                 
-                <div className="border border-green-200 dark:border-green-800 rounded-md overflow-hidden mb-2">
-                  <canvas ref={canvasRef} width="600" height="120" className="w-full h-32"></canvas>
+                <div className="border border-green-200 dark:border-green-800 rounded-md overflow-hidden mb-2 h-32 w-full bg-gray-900">
+                  {/* Replacing canvas with simpler visualization */}
+                  <div className="flex h-full items-center justify-center">
+                    <div className="flex space-x-1">
+                      {[...Array(10)].map((_, i) => (
+                        <div 
+                          key={i} 
+                          className="w-2 bg-green-500 rounded-full animate-pulse" 
+                          style={{
+                            height: `${(signalStrength * 100) * (0.5 + Math.random() * 0.5)}%`,
+                            animationDelay: `${i * 0.1}s`
+                          }}
+                        />
+                      ))}
+                    </div>
+                  </div>
                 </div>
                 
                 {/* Signal strength indicator */}

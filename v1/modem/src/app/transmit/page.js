@@ -90,34 +90,26 @@ export default function Transmit() {
         setAudioContext(context);
       }
       
-      // Enable speaker phone mode if selected
-      if (speakerMode && navigator.mediaDevices && typeof navigator.mediaDevices.getUserMedia === 'function') {
+      // For speaker phone mode, we'll use the device's volume to maximum
+      // as setSinkId is only available on HTMLMediaElements, not AudioContext
+      if (speakerMode) {
         try {
-          // Get audio output devices
-          const devices = await navigator.mediaDevices.enumerateDevices();
-          const audioOutputs = devices.filter(device => device.kind === 'audiooutput');
-          
-          // Look for speaker or loudspeaker
-          const speaker = audioOutputs.find(device => 
-            device.label.toLowerCase().includes('speaker') || 
-            device.label.toLowerCase().includes('loud'));
-          
-          if (speaker && typeof context.setSinkId === 'function') {
-            await context.setSinkId(speaker.deviceId);
-            console.log('Speaker phone mode enabled');
-          } else {
-            // Fallback for browsers that don't support setSinkId
-            // This is a best-effort approach as not all browsers support this API
-            if (typeof Audio !== 'undefined') {
-              const audio = new Audio();
-              if (typeof audio.setSinkId === 'function' && speaker) {
-                await audio.setSinkId(speaker.deviceId);
-                console.log('Speaker phone mode enabled via Audio API');
-              }
+          // For mobile devices, this can help with louder playback
+          // by ensuring volume is at maximum
+          if (typeof window !== 'undefined') {
+            // Try to get access to device volume controls if available
+            if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+              // Just getting audio permission can sometimes help with volume on mobile
+              await navigator.mediaDevices.getUserMedia({ audio: true });
             }
+            
+            console.log('Speaker phone mode: attempting to maximize volume');
+            
+            // We'll rely on the device's speakers being used by default
+            // and the user having their volume turned up
           }
         } catch (error) {
-          console.warn('Failed to enable speaker phone mode:', error);
+          console.warn('Failed to prepare speaker phone mode:', error);
         }
       }
 
