@@ -1,15 +1,9 @@
 {
   "version": 2,
-  "builds": [
-    {
-      "src": "package.json",
-      "use": "@vercel/next"
-    }
-  ],
-  "routes": [
-    {
-      "src": "/modem/(.*)",
-      "dest": "/modem"
-    }
+  "buildCommand": "next build",
+  "outputDirectory": ".next",
+  "framework": "nextjs",
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/" }
   ]
 }

@@ -139,87 +139,38 @@ export default function Transmit() {
       const dataArray = new Uint8Array(bufferLength);
       const freqData = new Uint8Array(bufferLength);
       
+      // Setup an interval to update the signal strength
+      const visualizationInterval = setInterval(() => {
+        if (!isSending) {
+          clearInterval(visualizationInterval);
+          signalStrengthRef.current = 0;
+          return;
+        }
+        
+        // Get frequency data
+        analyzer.getByteFrequencyData(freqData);
+        
+        // Calculate signal strength
+        let sum = 0;
+        for (let i = 0; i < freqData.length; i++) {
+          sum += freqData[i];
+        }
+        const avgStrength = sum / freqData.length;
+        signalStrengthRef.current = avgStrength / 255; // Normalize to 0-1
+      }, 100); // Update 10 times per second
+      
       source.connect(analyzer);
       analyzer.connect(context.destination);
       source.start(0);
       setIsTransmitting(true);
       
-      // Draw visualization if canvas is available
-      if (canvasRef.current) {
-        const canvas = canvasRef.current;
-        const canvasCtx = canvas.getContext('2d');
-        
-        function draw() {
-          if (status !== 'sending') return;
-          
-          requestAnimationFrame(draw);
-          
-          // Get both time and frequency domain data
-          analyzer.getByteTimeDomainData(dataArray);
-          analyzer.getByteFrequencyData(freqData);
-          
-          // Calculate signal strength (average of frequency data)
-          let sum = 0;
-          for (let i = 0; i < freqData.length; i++) {
-            sum += freqData[i];
-          }
-          const avgStrength = sum / freqData.length;
-          signalStrengthRef.current = avgStrength / 255; // Normalize to 0-1
-          
-          // Clear canvas
-          canvasCtx.fillStyle = 'rgb(34, 40, 49)';
-          canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
-          
-          // Draw waveform
-          canvasCtx.lineWidth = 2;
-          canvasCtx.strokeStyle = 'rgb(0, 255, 0)';
-          canvasCtx.beginPath();
-          
-          const sliceWidth = canvas.width / bufferLength;
-          let x = 0;
-          
-          for (let i = 0; i < bufferLength; i++) {
-            const v = dataArray[i] / 128.0;
-            const y = v * canvas.height/2;
-            
-            if (i === 0) {
-              canvasCtx.moveTo(x, y);
-            } else {
-              canvasCtx.lineTo(x, y);
-            }
-            
-            x += sliceWidth;
-          }
-          
-          canvasCtx.lineTo(canvas.width, canvas.height/2);
-          canvasCtx.stroke();
-          
-          // Draw frequency spectrum at the bottom
-          canvasCtx.fillStyle = 'rgb(0, 255, 255)';
-          const barWidth = canvas.width / (bufferLength / 4);
-          x = 0;
-          
-          // Only show lower frequencies (first quarter of data)
-          for (let i = 0; i < bufferLength / 4; i++) {
-            const barHeight = (freqData[i] / 255) * (canvas.height / 3);
-            canvasCtx.fillRect(x, canvas.height - barHeight, barWidth, barHeight);
-            x += barWidth;
-          }
-          
-          // Draw signal strength indicator
-          canvasCtx.fillStyle = `rgba(255, ${Math.floor(255 * signalStrengthRef.current)}, 0, 0.7)`;
-          canvasCtx.fillRect(canvas.width - 30, 10, 20, 100);
-          canvasCtx.fillStyle = 'rgb(255, 255, 255)';
-          canvasCtx.fillRect(canvas.width - 30, 110 - (signalStrengthRef.current * 100), 20, 2);
-          
-          // Add text label
-          canvasCtx.fillStyle = 'white';
-          canvasCtx.font = '10px Arial';
-          canvasCtx.fillText('Signal', canvas.width - 30, 125);
-        }
-        
-        draw();
-      }
+      // Clean up function
+      const cleanup = () => {
+        clearInterval(visualizationInterval);
+      };
+      
+      // Store cleanup function for later use
+      window.modemTransmitCleanup = cleanup;
 
       // Set timeout to update UI after transmission finishes
       source.onended = () => {
@@ -351,8 +302,23 @@ export default function Transmit() {
                 <p className="text-blue-600 dark:text-blue-400 mb-2">
                   Transmitting &ldquo;{code}&rdquo;...
                 </p>
-                <div className="border border-blue-200 dark:border-blue-800 rounded-md overflow-hidden">
-                  <canvas ref={canvasRef} className="w-full h-48"></canvas>
+                <div className="border border-blue-200 dark:border-blue-800 rounded-md overflow-hidden h-48 bg-gray-900">
+                  {/* Replacing canvas with simpler visualization */}
+                  <div className="flex h-full items-center justify-center">
+                    <div className="flex space-x-2">
+                      {[...Array(12)].map((_, i) => (
+                        <div 
+                          key={i} 
+                          className="w-3 bg-blue-500 rounded-full animate-pulse" 
+                          style={{
+                            height: `${20 + Math.random() * 60}%`,
+                            animationDelay: `${i * 0.1}s`,
+                            animationDuration: `${0.5 + Math.random() * 0.8}s`
+                          }}
+                        />
+                      ))}
+                    </div>
+                  </div>
                 </div>
                 {isTransmitting && (
                   <div className="mt-2 flex items-center justify-center">
