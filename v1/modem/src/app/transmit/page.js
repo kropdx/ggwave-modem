@@ -12,7 +12,10 @@ export default function Transmit() {
   const [volume, setVolume] = useState(50);
   const [protocol, setProtocol] = useState('GGWAVE_PROTOCOL_AUDIBLE_FAST');
   const [protocols, setProtocols] = useState([]);
+  const [speakerMode, setSpeakerMode] = useState(false);
+  const [isTransmitting, setIsTransmitting] = useState(false);
   const canvasRef = useRef(null);
+  const signalStrengthRef = useRef(0);
 
   // Load the ggwave library when component mounts
   useEffect(() => {
@@ -86,6 +89,37 @@ export default function Transmit() {
       if (!audioContext) {
         setAudioContext(context);
       }
+      
+      // Enable speaker phone mode if selected
+      if (speakerMode && navigator.mediaDevices && typeof navigator.mediaDevices.getUserMedia === 'function') {
+        try {
+          // Get audio output devices
+          const devices = await navigator.mediaDevices.enumerateDevices();
+          const audioOutputs = devices.filter(device => device.kind === 'audiooutput');
+          
+          // Look for speaker or loudspeaker
+          const speaker = audioOutputs.find(device => 
+            device.label.toLowerCase().includes('speaker') || 
+            device.label.toLowerCase().includes('loud'));
+          
+          if (speaker && typeof context.setSinkId === 'function') {
+            await context.setSinkId(speaker.deviceId);
+            console.log('Speaker phone mode enabled');
+          } else {
+            // Fallback for browsers that don't support setSinkId
+            // This is a best-effort approach as not all browsers support this API
+            if (typeof Audio !== 'undefined') {
+              const audio = new Audio();
+              if (typeof audio.setSinkId === 'function' && speaker) {
+                await audio.setSinkId(speaker.deviceId);
+                console.log('Speaker phone mode enabled via Audio API');
+              }
+            }
+          }
+        } catch (error) {
+          console.warn('Failed to enable speaker phone mode:', error);
+        }
+      }
 
       // Get ggwave instance
       const { ggwave, instance } = ggwaveInstance;
@@ -108,13 +142,15 @@ export default function Transmit() {
       
       // Create analyzer to visualize sound wave
       const analyzer = context.createAnalyser();
-      analyzer.fftSize = 256;
+      analyzer.fftSize = 1024; // Increased for better resolution
       const bufferLength = analyzer.frequencyBinCount;
       const dataArray = new Uint8Array(bufferLength);
+      const freqData = new Uint8Array(bufferLength);
       
       source.connect(analyzer);
       analyzer.connect(context.destination);
       source.start(0);
+      setIsTransmitting(true);
       
       // Draw visualization if canvas is available
       if (canvasRef.current) {
@@ -125,20 +161,34 @@ export default function Transmit() {
           if (status !== 'sending') return;
           
           requestAnimationFrame(draw);
-          analyzer.getByteTimeDomainData(dataArray);
           
+          // Get both time and frequency domain data
+          analyzer.getByteTimeDomainData(dataArray);
+          analyzer.getByteFrequencyData(freqData);
+          
+          // Calculate signal strength (average of frequency data)
+          let sum = 0;
+          for (let i = 0; i < freqData.length; i++) {
+            sum += freqData[i];
+          }
+          const avgStrength = sum / freqData.length;
+          signalStrengthRef.current = avgStrength / 255; // Normalize to 0-1
+          
+          // Clear canvas
           canvasCtx.fillStyle = 'rgb(34, 40, 49)';
           canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
+          
+          // Draw waveform
           canvasCtx.lineWidth = 2;
-          canvasCtx.strokeStyle = 'rgb(79, 193, 233)';
+          canvasCtx.strokeStyle = 'rgb(0, 255, 0)';
           canvasCtx.beginPath();
           
-          const sliceWidth = canvas.width * 1.0 / bufferLength;
+          const sliceWidth = canvas.width / bufferLength;
           let x = 0;
           
           for (let i = 0; i < bufferLength; i++) {
             const v = dataArray[i] / 128.0;
-            const y = v * canvas.height / 2;
+            const y = v * canvas.height/2;
             
             if (i === 0) {
               canvasCtx.moveTo(x, y);
@@ -149,8 +199,31 @@ export default function Transmit() {
             x += sliceWidth;
           }
           
-          canvasCtx.lineTo(canvas.width, canvas.height / 2);
+          canvasCtx.lineTo(canvas.width, canvas.height/2);
           canvasCtx.stroke();
+          
+          // Draw frequency spectrum at the bottom
+          canvasCtx.fillStyle = 'rgb(0, 255, 255)';
+          const barWidth = canvas.width / (bufferLength / 4);
+          x = 0;
+          
+          // Only show lower frequencies (first quarter of data)
+          for (let i = 0; i < bufferLength / 4; i++) {
+            const barHeight = (freqData[i] / 255) * (canvas.height / 3);
+            canvasCtx.fillRect(x, canvas.height - barHeight, barWidth, barHeight);
+            x += barWidth;
+          }
+          
+          // Draw signal strength indicator
+          canvasCtx.fillStyle = `rgba(255, ${Math.floor(255 * signalStrengthRef.current)}, 0, 0.7)`;
+          canvasCtx.fillRect(canvas.width - 30, 10, 20, 100);
+          canvasCtx.fillStyle = 'rgb(255, 255, 255)';
+          canvasCtx.fillRect(canvas.width - 30, 110 - (signalStrengthRef.current * 100), 20, 2);
+          
+          // Add text label
+          canvasCtx.fillStyle = 'white';
+          canvasCtx.font = '10px Arial';
+          canvasCtx.fillText('Signal', canvas.width - 30, 125);
         }
         
         draw();
@@ -159,12 +232,16 @@ export default function Transmit() {
       // Set timeout to update UI after transmission finishes
       source.onended = () => {
         setIsSending(false);
+        setIsTransmitting(false);
         setStatus('sent');
+        signalStrengthRef.current = 0;
         
-        // Reset after 3 seconds
+        // Reset status after 5 seconds
         setTimeout(() => {
-          setStatus('idle');
-        }, 3000);
+          if (status === 'sent') { // Only reset if still in 'sent' state
+            setStatus('idle');
+          }
+        }, 5000);
       };
     } catch (error) {
       console.error('Error transmitting code:', error);
@@ -242,6 +319,20 @@ export default function Transmit() {
               />
             </div>
           </div>
+          
+          <div className="flex items-center">
+            <input
+              type="checkbox"
+              id="speakerMode"
+              checked={speakerMode}
+              onChange={(e) => setSpeakerMode(e.target.checked)}
+              disabled={isSending}
+              className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded"
+            />
+            <label htmlFor="speakerMode" className="ml-2 block text-sm text-gray-700 dark:text-gray-300">
+              Enable Speaker Phone Mode (for mobile)
+            </label>
+          </div>
 
           <div className="flex justify-center">
             <button
@@ -269,8 +360,21 @@ export default function Transmit() {
                   Transmitting &ldquo;{code}&rdquo;...
                 </p>
                 <div className="border border-blue-200 dark:border-blue-800 rounded-md overflow-hidden">
-                  <canvas ref={canvasRef} className="w-full h-32"></canvas>
+                  <canvas ref={canvasRef} className="w-full h-48"></canvas>
                 </div>
+                {isTransmitting && (
+                  <div className="mt-2 flex items-center justify-center">
+                    <div className="relative w-64 h-6 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                      <div 
+                        className="h-full bg-blue-500 transition-all duration-100"
+                        style={{ width: `${Math.floor(signalStrengthRef.current * 100)}%` }}
+                      ></div>
+                    </div>
+                    <span className="ml-2 text-sm text-gray-600 dark:text-gray-400">
+                      {Math.floor(signalStrengthRef.current * 100)}%
+                    </span>
+                  </div>
+                )}
               </div>
             )}
             {status === 'sent' && (

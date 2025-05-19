@@ -13,6 +13,8 @@ export default function Home() {
   const [mediaStream, setMediaStream] = useState(null);
   const [audioContext, setAudioContext] = useState(null);
   const [recorder, setRecorder] = useState(null);
+  const [signalStrength, setSignalStrength] = useState(0);
+  const canvasRef = useRef(null);
   const audioRef = useRef(null);
 
   // Load the ggwave library when component mounts
@@ -100,6 +102,81 @@ export default function Home() {
 
       // Create media stream source
       const mediaStreamSource = context.createMediaStreamSource(stream);
+      
+      // Create analyzer node for visualizing the audio signal
+      const analyzerNode = context.createAnalyser();
+      analyzerNode.fftSize = 1024;
+      mediaStreamSource.connect(analyzerNode);
+      
+      // Set up visualization if canvas exists
+      if (canvasRef.current) {
+        const canvas = canvasRef.current;
+        const canvasCtx = canvas.getContext('2d');
+        const bufferLength = analyzerNode.frequencyBinCount;
+        const dataArray = new Uint8Array(bufferLength);
+        const freqData = new Uint8Array(bufferLength);
+        
+        function drawSignal() {
+          if (!isCaptureActive) return;
+          
+          requestAnimationFrame(drawSignal);
+          
+          // Get time and frequency domain data
+          analyzerNode.getByteTimeDomainData(dataArray);
+          analyzerNode.getByteFrequencyData(freqData);
+          
+          // Calculate signal strength
+          let sum = 0;
+          for (let i = 0; i < freqData.length; i++) {
+            sum += freqData[i];
+          }
+          const avgStrength = sum / freqData.length;
+          const normalizedStrength = avgStrength / 255;
+          setSignalStrength(normalizedStrength);
+          
+          // Clear canvas
+          canvasCtx.fillStyle = 'rgb(34, 40, 49)';
+          canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
+          
+          // Draw waveform
+          canvasCtx.lineWidth = 2;
+          canvasCtx.strokeStyle = 'rgb(0, 255, 0)';
+          canvasCtx.beginPath();
+          
+          const sliceWidth = canvas.width / bufferLength;
+          let x = 0;
+          
+          for (let i = 0; i < bufferLength; i++) {
+            const v = dataArray[i] / 128.0;
+            const y = v * canvas.height/2;
+            
+            if (i === 0) {
+              canvasCtx.moveTo(x, y);
+            } else {
+              canvasCtx.lineTo(x, y);
+            }
+            
+            x += sliceWidth;
+          }
+          
+          canvasCtx.lineTo(canvas.width, canvas.height/2);
+          canvasCtx.stroke();
+          
+          // Draw frequency spectrum
+          canvasCtx.fillStyle = 'rgb(0, 255, 255)';
+          const barWidth = canvas.width / (bufferLength / 4);
+          x = 0;
+          
+          // Only show lower frequencies (first quarter of data)
+          for (let i = 0; i < bufferLength / 4; i++) {
+            const barHeight = (freqData[i] / 255) * (canvas.height / 3);
+            canvasCtx.fillRect(x, canvas.height - barHeight, barWidth, barHeight);
+            x += barWidth;
+          }
+        }
+        
+        drawSignal();
+      }
 
       // Create script processor for audio processing
       const bufferSize = 1024;
@@ -139,10 +216,9 @@ export default function Home() {
         }
       };
 
-      // Connect the audio nodes
+      // Connect nodes and start capturing
       mediaStreamSource.connect(processorNode);
       processorNode.connect(context.destination);
-
       setRecorder(processorNode);
 
     } catch (error) {
@@ -226,20 +302,56 @@ export default function Home() {
               </p>
             )}
             {status === 'listening' && (
-              <div className="animate-pulse flex items-center justify-center space-x-2">
-                <div className="w-3 h-3 bg-indigo-500 rounded-full"></div>
-                <p className="text-indigo-600 dark:text-indigo-400">
-                  Listening for codes...
-                </p>
+              <div>
+                <div className="animate-pulse flex items-center justify-center space-x-2 mb-2">
+                  <div className="w-3 h-3 bg-indigo-500 rounded-full"></div>
+                  <p className="text-indigo-600 dark:text-indigo-400">
+                    Listening for codes...
+                  </p>
+                </div>
+                
+                <div className="border border-indigo-200 dark:border-indigo-800 rounded-md overflow-hidden mb-2">
+                  <canvas ref={canvasRef} width="600" height="120" className="w-full h-32"></canvas>
+                </div>
+                
+                {/* Signal strength indicator */}
+                <div className="flex items-center justify-center mb-2">
+                  <div className="w-64 h-6 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                    <div 
+                      className={`h-full transition-all duration-100 ${signalStrength > 0.3 ? 'bg-green-500' : 'bg-indigo-500'}`}
+                      style={{ width: `${Math.floor(signalStrength * 100)}%` }}
+                    ></div>
+                  </div>
+                  <span className="ml-2 text-sm text-gray-600 dark:text-gray-400">
+                    {Math.floor(signalStrength * 100)}%
+                  </span>
+                </div>
               </div>
             )}
             {status === 'receiving' && receivedCodes.length > 0 && (
               <div>
-                <div className="animate-pulse flex items-center justify-center space-x-2 mb-4">
+                <div className="animate-pulse flex items-center justify-center space-x-2 mb-2">
                   <div className="w-3 h-3 bg-green-500 rounded-full"></div>
                   <p className="text-green-600 dark:text-green-400">
                     Actively receiving codes
                   </p>
+                </div>
+                
+                <div className="border border-green-200 dark:border-green-800 rounded-md overflow-hidden mb-2">
+                  <canvas ref={canvasRef} width="600" height="120" className="w-full h-32"></canvas>
+                </div>
+                
+                {/* Signal strength indicator */}
+                <div className="flex items-center justify-center mb-4">
+                  <div className="w-64 h-6 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                    <div 
+                      className="h-full bg-green-500 transition-all duration-100"
+                      style={{ width: `${Math.floor(signalStrength * 100)}%` }}
+                    ></div>
+                  </div>
+                  <span className="ml-2 text-sm text-gray-600 dark:text-gray-400">
+                    {Math.floor(signalStrength * 100)}%
+                  </span>
                 </div>
                 
                 <div className="bg-gray-100 dark:bg-gray-700 p-4 rounded-md max-h-60 overflow-y-auto">
