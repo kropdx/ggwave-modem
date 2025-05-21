@@ -1,0 +1,6 @@
+{
+  "version": 2,
+  "buildCommand": "cd v1/modem && npm run build",
+  "outputDirectory": "v1/modem/.next",
+  "framework": "nextjs"
+}

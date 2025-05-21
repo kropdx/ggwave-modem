@@ -79,10 +79,20 @@ export default function Home() {
       setIsCaptureActive(true);
 
       // Initialize audio context if not already done
-      const context = new (window.AudioContext || window.webkitAudioContext)({
-        sampleRate: 48000
-      });
-      setAudioContext(context);
+      let context;
+      if (!audioContext) {
+        context = new (window.AudioContext || window.webkitAudioContext)({
+          sampleRate: 48000
+        });
+        setAudioContext(context);
+      } else {
+        context = audioContext;
+      }
+      
+      // Resume the audio context if it's suspended
+      if (context.state === 'suspended') {
+        await context.resume();
+      }
 
       // Update ggwave parameters with actual audio context sample rate
       const { ggwave, instance } = ggwaveInstance;
@@ -91,51 +101,108 @@ export default function Home() {
       parameters.sampleRateOut = context.sampleRate;
       
       // Get microphone access
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: false,
-          autoGainControl: false,
-          noiseSuppression: false
-        }
-      });
-      setMediaStream(stream);
+      let stream;
+      try {
+        console.log('Requesting microphone access...');
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: false,
+            autoGainControl: false,
+            noiseSuppression: false,
+            channelCount: 1,
+            sampleRate: 48000
+          },
+          video: false
+        });
+        console.log('Microphone access granted, stream active:', stream.active);
+        console.log('Audio tracks:', stream.getAudioTracks().map(t => ({
+          id: t.id,
+          kind: t.kind,
+          label: t.label,
+          muted: t.muted,
+          readyState: t.readyState
+        })));
+        setMediaStream(stream);
+      } catch (err) {
+        console.error('Error accessing microphone:', err);
+        setStatus('error');
+        setIsCaptureActive(false);
+        return;
+      }
 
       // Create media stream source
       const mediaStreamSource = context.createMediaStreamSource(stream);
+      console.log('Created media stream source');
       
       // Create analyzer node for visualizing the audio signal
       const analyzerNode = context.createAnalyser();
       analyzerNode.fftSize = 1024;
-      mediaStreamSource.connect(analyzerNode);
+      analyzerNode.smoothingTimeConstant = 0.8; // Add some smoothing
+      console.log('Created analyzer node with fftSize:', analyzerNode.fftSize);
       
-      // Setup visualization data (without requiring canvas to be mounted yet)
+      // Connect the nodes
+      mediaStreamSource.connect(analyzerNode);
+      console.log('Connected mediaStreamSource to analyzerNode');
+      
+      // Setup visualization data
       const bufferLength = analyzerNode.frequencyBinCount;
       const dataArray = new Uint8Array(bufferLength);
       const freqData = new Uint8Array(bufferLength);
       
-      // Setup an interval to update the signal strength
-      const visualizationInterval = setInterval(() => {
-        if (!isCaptureActive) {
-          clearInterval(visualizationInterval);
-          return;
-        }
+      // Debug log for audio context and analyzer setup
+      console.log('Audio context sample rate:', context.sampleRate);
+      console.log('Analyzer FFT size:', analyzerNode.fftSize);
+      console.log('Frequency bin count:', analyzerNode.frequencyBinCount);
+      
+      // Function to update visualization
+      const updateVisualization = () => {
+        if (!isCaptureActive) return;
+        
+        // Get time domain data
+        analyzerNode.getByteTimeDomainData(dataArray);
         
         // Get frequency data to calculate signal strength
         analyzerNode.getByteFrequencyData(freqData);
         
-        // Calculate signal strength
+        // Log first few frequency values for debugging
+        if (Date.now() % 1000 < 16) { // Log once per second
+          console.log('Frequency data (first 10 values):', Array.from(freqData).slice(0, 10));
+        }
+        
+        // Calculate signal strength (more responsive version)
         let sum = 0;
+        let max = 0;
         for (let i = 0; i < freqData.length; i++) {
           sum += freqData[i];
+          if (freqData[i] > max) max = freqData[i];
         }
+        
+        // More responsive signal strength calculation
         const avgStrength = sum / freqData.length;
-        const normalizedStrength = avgStrength / 255;
-        setSignalStrength(normalizedStrength);
-      }, 100); // Update 10 times per second
+        const normalizedStrength = Math.min(1, max / 200); // Scale max to 0-1 range
+        
+        // Log signal strength periodically
+        if (Date.now() % 1000 < 16) { // Log once per second
+          console.log('Signal strength - Raw:', max, 'Normalized:', normalizedStrength, 'Average:', avgStrength);
+        }
+        
+        // Update state with some smoothing
+        setSignalStrength(prev => {
+          // Apply some smoothing to the signal strength
+          const newStrength = prev * 0.7 + normalizedStrength * 0.3;
+          return newStrength;
+        });
+        
+        // Continue the animation frame loop
+        requestAnimationFrame(updateVisualization);
+      };
+      
+      // Start the visualization loop
+      const animationId = requestAnimationFrame(updateVisualization);
       
       // Clean up function to be called when component unmounts
       const cleanup = () => {
-        clearInterval(visualizationInterval);
+        cancelAnimationFrame(animationId);
       };
       
       // Store cleanup function for later use
@@ -192,20 +259,33 @@ export default function Home() {
   };
 
   const stopCapturing = () => {
+    setIsCaptureActive(false);
+    
     if (recorder && audioContext) {
-      recorder.disconnect(audioContext.destination);
-      setRecorder(null);
+      try {
+        recorder.disconnect();
+        setRecorder(null);
+      } catch (e) {
+        console.error('Error disconnecting recorder:', e);
+      }
     }
 
     if (mediaStream) {
-      mediaStream.getTracks().forEach(track => track.stop());
+      try {
+        mediaStream.getTracks().forEach(track => {
+          track.stop();
+          mediaStream.removeTrack(track);
+        });
+      } catch (e) {
+        console.error('Error stopping media stream:', e);
+      }
       setMediaStream(null);
     }
 
-    setIsCaptureActive(false);
-    if (status !== 'success') {
-      setStatus('idle');
-    }
+    setStatus('idle');
+    
+    // Reset signal strength when stopping
+    setSignalStrength(0);
   };
 
   const resetListener = () => {
@@ -273,32 +353,51 @@ export default function Home() {
                   </p>
                 </div>
                 
-                <div className="border border-indigo-200 dark:border-indigo-800 rounded-md overflow-hidden mb-2 h-32 w-full bg-gray-900">
-                  {/* Replacing canvas with simpler visualization */}
+                <div className="border border-indigo-200 dark:border-indigo-800 rounded-md overflow-hidden mb-2 h-32 w-full bg-gray-900 p-2">
                   <div className="flex h-full items-center justify-center">
-                    <div className="flex space-x-1">
-                      {[...Array(10)].map((_, i) => (
-                        <div 
-                          key={i} 
-                          className="w-2 bg-green-500 rounded-full animate-pulse" 
-                          style={{
-                            height: `${(signalStrength * 100) * (0.5 + Math.random() * 0.5)}%`,
-                            animationDelay: `${i * 0.1}s`
-                          }}
-                        />
-                      ))}
+                    <div className="flex space-x-1 items-end h-full w-full">
+                      {[...Array(30)].map((_, i) => {
+                        // Create a more dynamic visualization based on signal strength
+                        const height = Math.min(
+                          100, 
+                          (signalStrength * 150) * 
+                          (0.7 + 0.6 * Math.sin(i * 0.5 + Date.now() * 0.01)) * 
+                          (0.8 + Math.random() * 0.4)
+                        );
+                        
+                        // Color based on signal strength
+                        const colorClass = signalStrength > 0.6 ? 'bg-green-500' : 
+                                          signalStrength > 0.3 ? 'bg-yellow-500' : 'bg-indigo-500';
+                        
+                        return (
+                          <div 
+                            key={i} 
+                            className={`w-1.5 rounded-full transition-all duration-75 ${colorClass}`}
+                            style={{
+                              height: `${height}%`,
+                              opacity: 0.7 + (signalStrength * 0.3)
+                            }}
+                          />
+                        );
+                      })}
                     </div>
                   </div>
                 </div>
                 
-                {/* Signal strength indicator */}
-                <div className="flex items-center justify-center mb-2">
-                  <div className="w-64 h-6 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                {/* Signal strength indicator with text */}
+                <div className="flex flex-col items-center mb-2">
+                  <div className="w-full max-w-xs h-4 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden mb-1">
                     <div 
-                      className={`h-full transition-all duration-100 ${signalStrength > 0.3 ? 'bg-green-500' : 'bg-indigo-500'}`}
-                      style={{ width: `${Math.floor(signalStrength * 100)}%` }}
+                      className={`h-full transition-all duration-200 ${
+                        signalStrength > 0.6 ? 'bg-green-500' : 
+                        signalStrength > 0.3 ? 'bg-yellow-500' : 'bg-indigo-500'
+                      }`}
+                      style={{ width: `${Math.min(100, Math.floor(signalStrength * 110))}%` }}
                     ></div>
                   </div>
+                  <p className="text-xs text-gray-600 dark:text-gray-400">
+                    Signal strength: {Math.floor(signalStrength * 100)}%
+                  </p>
                   <span className="ml-2 text-sm text-gray-600 dark:text-gray-400">
                     {Math.floor(signalStrength * 100)}%
                   </span>

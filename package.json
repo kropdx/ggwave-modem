@@ -1,0 +1,13 @@
+{
+  "name": "ggwave-modem-root",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "cd v1/modem && npm install && npm run build",
+    "start": "cd v1/modem && npm run start",
+    "dev": "cd v1/modem && npm run dev"
+  },
+  "workspaces": [
+    "v1/modem"
+  ]
+}
